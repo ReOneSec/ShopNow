@@ -8,6 +8,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import { Audio } from 'expo-av';
 import Animated, {
   useSharedValue,
@@ -33,7 +34,7 @@ export default function ChatScreen() {
   const { id: conversationId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { user } = useAuthStore();
-  const { messages, setMessages, appendMessage, removeConversation } = useChatStore();
+  const { conversations, messages, setMessages, appendMessage, removeConversation, removeMessages } = useChatStore();
 
   const [text, setText] = useState('');
   const [partner, setPartner] = useState<AppUser | null>(null);
@@ -42,6 +43,8 @@ export default function ChatScreen() {
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [showPanicConfirm, setShowPanicConfirm] = useState(false);
+  const [showProfilePic, setShowProfilePic] = useState(false);
+  const [showOptions, setShowOptions] = useState(false);
   const [typingVisible, setTypingVisible] = useState(false);
   const [isEphemeral, setIsEphemeral] = useState(false);
 
@@ -59,26 +62,28 @@ export default function ChatScreen() {
     if (!user || !conversationId) return;
 
     // Get partner
-    const loadPartner = async () => {
-      const { data } = await supabase
-        .from('conversation_members')
-        .select('users (id, username, alias, profile_image, is_online, last_seen)')
-        .eq('conversation_id', conversationId)
-        .neq('user_id', user.id)
-        .maybeSingle();
-      if (data) setPartner((data as any).users);
+    // Load partner from local store to avoid RLS restrictions on conversation_members
+    const loadPartner = () => {
+      const conv = conversations.find(c => c.id === conversationId);
+      if (conv?.partner) {
+        setPartner(conv.partner);
+      }
     };
 
-    // Load messages
+    // Load messages (get latest 200 messages)
     const loadMessages = async () => {
       const { data } = await supabase
         .from('messages')
         .select('*')
         .eq('conversation_id', conversationId)
         .eq('is_deleted', false)
-        .order('created_at', { ascending: true })
-        .limit(50);
-      if (data) setMessages(conversationId, data);
+        .order('created_at', { ascending: false })
+        .limit(200);
+        
+      if (data) {
+        // Reverse so the oldest of the latest 200 is at the top of the chat
+        setMessages(conversationId, data.reverse());
+      }
     };
 
     loadPartner();
@@ -159,7 +164,7 @@ export default function ChatScreen() {
   const pickAndSendMedia = async () => {
     setShowAttach(false);
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images', 'videos'],
+      mediaTypes: ImagePicker.MediaTypeOptions.All,
       quality: 0.85,
     });
     if (result.canceled || !result.assets[0]) return;
@@ -178,7 +183,32 @@ export default function ChatScreen() {
 
     if (!error) {
       const { data: { publicUrl } } = supabase.storage.from(BUCKET_MEDIA).getPublicUrl(path);
-      await sendMessage('', 'image', publicUrl);
+      const isVideo = asset.type === 'video' || asset.mimeType?.startsWith('video/');
+      await sendMessage('', isVideo ? 'video' : 'image', publicUrl);
+    }
+  };
+
+  // ── Document picker ──────────────────────────────────────────────────────
+  const pickAndSendDocument = async () => {
+    setShowAttach(false);
+    const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
+    if (result.canceled || !result.assets[0]) return;
+
+    const asset = result.assets[0];
+    const ext = asset.name.split('.').pop() || 'file';
+    const path = `${user?.id}/doc_${Date.now()}.${ext}`;
+
+    const response = await fetch(asset.uri);
+    const blob = await response.blob();
+    const ab = await blob.arrayBuffer();
+
+    const { error } = await supabase.storage.from(BUCKET_MEDIA).upload(path, ab, {
+      contentType: asset.mimeType || 'application/octet-stream',
+    });
+
+    if (!error) {
+      const { data: { publicUrl } } = supabase.storage.from(BUCKET_MEDIA).getPublicUrl(path);
+      await sendMessage(asset.name, 'document', publicUrl);
     }
   };
 
@@ -269,8 +299,25 @@ export default function ChatScreen() {
           </View>
         ) : item.message_type === 'image' && item.media_url ? (
           <Image source={{ uri: item.media_url }} style={styles.mediaImage} resizeMode="cover" />
+        ) : item.message_type === 'video' && item.media_url ? (
+          <TouchableOpacity onPress={() => Linking.openURL(item.media_url!)}>
+            <Image source={{ uri: item.media_url }} style={styles.mediaImage} resizeMode="cover" />
+            <View style={{position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center'}}>
+               <AppIcon name="play" size={48} color="rgba(255,255,255,0.8)" />
+            </View>
+          </TouchableOpacity>
+        ) : item.message_type === 'document' && item.media_url ? (
+          <TouchableOpacity 
+            style={styles.voiceRow} 
+            onPress={() => Linking.openURL(item.media_url!)}
+          >
+            <AppIcon name="file" size={18} color={isMine ? '#fff' : Colors.label} />
+            <Text style={[styles.voiceText, isMine && styles.voiceTextMine]} numberOfLines={1}>
+              {item.content || 'Document'}
+            </Text>
+          </TouchableOpacity>
         ) : item.message_type === 'voice' && item.media_url ? (
-          <TouchableOpacity style={styles.voiceRow}>
+          <TouchableOpacity style={styles.voiceRow} onPress={() => Linking.openURL(item.media_url!)}>
             <AppIcon name="mic" size={18} color={isMine ? '#fff' : Colors.label} />
             <Text style={[styles.voiceText, isMine && styles.voiceTextMine]}>Voice note</Text>
             <Text style={styles.voicePlayIcon}>▶</Text>
@@ -300,7 +347,7 @@ export default function ChatScreen() {
           <AppIcon name="back" size={24} color={Colors.blue} />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.partnerInfo}>
+        <TouchableOpacity style={styles.partnerInfo} onPress={() => setShowProfilePic(true)}>
           <View style={styles.headerAvatarWrap}>
             {partner?.profile_image ? (
               <Image source={{ uri: partner.profile_image }} style={styles.headerAvatar} />
@@ -319,16 +366,24 @@ export default function ChatScreen() {
           </View>
         </TouchableOpacity>
 
-        {/* Panic button */}
-        <TouchableOpacity
-          style={styles.panicBtn}
-          onLongPress={() => {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-            setShowPanicConfirm(true);
-          }}
-        >
-          <AppIcon name="trash" size={17} color={Colors.label} />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TouchableOpacity
+            style={styles.panicBtn}
+            onPress={() => setShowOptions(true)}
+          >
+            <Text style={{ fontSize: 20, color: Colors.label, fontWeight: '700', paddingBottom: 6 }}>⋮</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.panicBtn}
+            onLongPress={() => {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+              setShowPanicConfirm(true);
+            }}
+          >
+            <AppIcon name="trash" size={17} color={Colors.label} />
+          </TouchableOpacity>
+        </View>
       </BlurView>
 
       {/* ── Typing indicator ──────────────────────────────── */}
@@ -421,9 +476,8 @@ export default function ChatScreen() {
         <View style={styles.attachPanel}>
           {[
             { icon: 'image', label: 'Photo/Video', action: pickAndSendMedia },
-            { icon: 'camera', label: 'Camera', action: () => { setShowAttach(false); } },
-            { icon: 'film', label: 'GIF', action: () => { setShowAttach(false); } },
-            { icon: 'smile', label: 'Sticker', action: () => { setShowAttach(false); } },
+            { icon: 'file', label: 'Document', action: pickAndSendDocument },
+            { icon: 'film', label: 'GIF', action: pickAndSendMedia },
           ].map((item) => (
             <TouchableOpacity key={item.label} style={styles.attachItem} onPress={item.action}>
               <AppIcon name={item.icon as any} size={32} color={Colors.label} />
@@ -450,6 +504,68 @@ export default function ChatScreen() {
             </TouchableOpacity>
             <TouchableOpacity style={styles.panicCancelBtn} onPress={() => setShowPanicConfirm(false)}>
               <Text style={styles.panicCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Profile Picture Modal ──────────────────────────── */}
+      <Modal visible={showProfilePic} transparent animationType="fade">
+        <View style={styles.panicOverlay}>
+          <TouchableOpacity style={styles.modalBgClose} onPress={() => setShowProfilePic(false)} />
+          {partner?.profile_image ? (
+            <Image source={{ uri: partner.profile_image }} style={styles.fullProfileImage} />
+          ) : (
+            <View style={[styles.fullProfileImage, styles.fullProfileFallback]}>
+              <Text style={styles.fullProfileInitial}>{partner?.alias?.[0]}</Text>
+            </View>
+          )}
+          <TouchableOpacity style={styles.closeProfileBtn} onPress={() => setShowProfilePic(false)}>
+            <AppIcon name="close" size={24} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
+      {/* ── WhatsApp-like Options Modal ────────────────────── */}
+      <Modal visible={showOptions} transparent animationType="fade">
+        <View style={styles.panicOverlay}>
+          <TouchableOpacity style={styles.modalBgClose} onPress={() => setShowOptions(false)} />
+          <View style={styles.optionsCard}>
+            <Text style={styles.optionsTitle}>Chat Options</Text>
+            
+            <TouchableOpacity style={styles.optionRow} onPress={() => {
+              setShowOptions(false);
+              setShowProfilePic(true);
+            }}>
+              <AppIcon name="person" size={20} color={Colors.label} />
+              <Text style={styles.optionText}>View Profile Picture</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.optionRow} onPress={() => {
+              setShowOptions(false);
+              Alert.alert('Clear Chat', 'This will delete all messages locally.', [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Clear', style: 'destructive', onPress: () => {
+                  removeMessages(conversationId);
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                }}
+              ]);
+            }}>
+              <AppIcon name="trash" size={20} color={Colors.red} />
+              <Text style={[styles.optionText, { color: Colors.red }]}>Clear Chat</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.optionRow} onPress={() => {
+              setShowOptions(false);
+              Alert.alert('Block User', `Are you sure you want to block ${partner?.alias}?`, [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Block', style: 'destructive', onPress: () => {
+                   router.back();
+                }}
+              ]);
+            }}>
+              <AppIcon name="blocked" size={20} color={Colors.red} />
+              <Text style={[styles.optionText, { color: Colors.red }]}>Block</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -594,4 +710,16 @@ const styles = StyleSheet.create({
   panicConfirmText: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.5 },
   panicCancelBtn: { paddingVertical: 10 },
   panicCancelText: { color: Colors.blue, fontSize: 16, fontWeight: '600' },
+
+  // New Modals
+  modalBgClose: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0 },
+  fullProfileImage: { width: SCREEN_W * 0.8, height: SCREEN_W * 0.8, borderRadius: Radii.lg },
+  fullProfileFallback: { backgroundColor: Colors.blue, justifyContent: 'center', alignItems: 'center' },
+  fullProfileInitial: { fontSize: 80, color: '#fff', fontWeight: '700' },
+  closeProfileBtn: { position: 'absolute', top: 60, right: 20, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
+  
+  optionsCard: { backgroundColor: Colors.surface, borderRadius: Radii.sheet, padding: 24, width: SCREEN_W * 0.8, ...Shadows.lg },
+  optionsTitle: { ...Typography.title3, color: Colors.label, marginBottom: 20 },
+  optionRow: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingVertical: 14, borderBottomWidth: 0.5, borderBottomColor: Colors.separator },
+  optionText: { ...Typography.body, color: Colors.label },
 });

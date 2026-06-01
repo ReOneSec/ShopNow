@@ -100,6 +100,8 @@ export default function StealthRegisterScreen() {
       otpRefs.current[0]?.focus();
     } else {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      // Unlock the app so the (app) layout guard allows entry after onboarding
+      await useAuthStore.getState().unlockApp();
       // Load user profile if exists
       if (data?.user) {
         const { data: profile } = await supabase

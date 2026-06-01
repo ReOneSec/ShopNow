@@ -17,16 +17,18 @@ export default function RootLayout() {
   const { setSession, lockApp } = useAuthStore();
 
   useEffect(() => {
-    // Initialize Supabase session
+    // Initialize Supabase session (restore from AsyncStorage)
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
+      // NOTE: We do NOT auto-unlock here. The user must go through
+      // the hotspot + biometric/PIN to access StealthChat.
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
     });
 
-    // Lock app when backgrounded
+    // Lock app when backgrounded — session stays saved but app locks
     const handleAppState = (nextState: AppStateStatus) => {
       if (nextState === 'background' || nextState === 'inactive') {
         lockApp();

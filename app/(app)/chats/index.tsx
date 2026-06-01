@@ -34,6 +34,36 @@ export default function ChatsScreen() {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [showSearch, setShowSearch] = useState(false);
   const [pendingRequests, setPendingRequests] = useState<FriendRequestWithSender[]>([]);
+  const [sentRequests, setSentRequests] = useState<Set<string>>(new Set());
+  const [existingFriends, setExistingFriends] = useState<Set<string>>(new Set());
+
+  // ── Load sent requests & friendships ──────────────────────────────────────
+  const loadRelationships = useCallback(async () => {
+    if (!user) return;
+
+    // Load pending sent requests
+    const { data: sentData } = await (supabase.from('friend_requests') as any)
+      .select('receiver_id')
+      .eq('sender_id', user.id)
+      .eq('status', 'pending');
+    if (sentData) {
+      setSentRequests(new Set((sentData as any[]).map((r: any) => r.receiver_id)));
+    }
+
+    // Load existing friendships
+    const { data: friendsData } = await supabase
+      .from('friendships')
+      .select('user_one, user_two')
+      .or(`user_one.eq.${user.id},user_two.eq.${user.id}`);
+    if (friendsData) {
+      const friendIds = new Set(
+        (friendsData as any[]).map((f: any) =>
+          f.user_one === user.id ? f.user_two : f.user_one
+        )
+      );
+      setExistingFriends(friendIds);
+    }
+  }, [user]);
 
   // ── Load pending friend requests ─────────────────────────────────────────
   const loadFriendRequests = useCallback(async () => {
@@ -67,9 +97,13 @@ export default function ChatsScreen() {
   // ── Accept friend request ────────────────────────────────────────────────
   const acceptRequest = async (requestId: string) => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    // Server-side RPC now creates friendship + conversation automatically
+    const req = pendingRequests.find(r => r.id === requestId);
     await (supabase.rpc as any)('accept_friend_request', { request_id: requestId });
     setPendingRequests((prev) => prev.filter((r) => r.id !== requestId));
+    // Add to friends set
+    if (req) {
+      setExistingFriends(prev => new Set([...prev, req.sender_id]));
+    }
     await loadConversations();
   };
 
@@ -82,59 +116,49 @@ export default function ChatsScreen() {
 
   const loadConversations = useCallback(async () => {
     if (!user) return;
-
-    const { data, error } = await supabase
-      .from('conversation_members')
-      .select(`
-        conversation_id,
-        conversations (id, created_at, last_message, last_message_at, last_message_type),
-        users!inner (id, username, alias, profile_image, is_online, last_seen)
-      `)
-      .eq('user_id', user.id)
-      .order('created_at', { referencedTable: 'conversations', ascending: false });
-
+    const { data, error } = await supabase.rpc('get_chat_list');
+    
     if (!error && data) {
-      // Filter to get the partner (not self)
-      const convs: ConversationWithPartner[] = [];
-      // Re-query for members excluding self
-      for (const row of data as any[]) {
-        const conv = row.conversations;
-        if (!conv) continue;
-        // Get the other member
-        const { data: memberData } = await supabase
-          .from('conversation_members')
-          .select('users (id, username, alias, profile_image, is_online, last_seen)')
-          .eq('conversation_id', conv.id)
-          .neq('user_id', user.id)
-          .maybeSingle();
-        const partner = (memberData as any)?.users;
-        if (partner) {
-          convs.push({ ...conv, partner });
+      const uniqueConvs: ConversationWithPartner[] = [];
+      const seenPartners = new Set<string>();
+      
+      const parsedData = (data as any[]).map(row => ({
+        id: row.conversation_id,
+        created_at: row.created_at,
+        last_message: row.last_message,
+        last_message_at: row.last_message_at,
+        last_message_type: row.last_message_type,
+        partner: row.partner
+      }));
+
+      // Filter out duplicate partners (keep the most recent conversation)
+      for (const conv of parsedData) {
+        if (conv.partner && !seenPartners.has(conv.partner.id)) {
+          seenPartners.add(conv.partner.id);
+          uniqueConvs.push(conv);
         }
       }
-      setConversations(convs);
+      
+      setConversations(uniqueConvs);
     }
   }, [user]);
 
   useEffect(() => {
     loadConversations();
     loadFriendRequests();
+    loadRelationships();
 
     // Realtime subscription
     if (!user) return;
     const channel = supabase
-      .channel('conversations_list')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'conversations',
-      }, () => loadConversations())
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'friend_requests',
-        filter: `receiver_id=eq.${user.id}`,
-      }, () => loadFriendRequests())
+      .channel('chats_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => loadConversations())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_members' }, () => loadConversations())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests' }, () => {
+        loadFriendRequests();
+        loadRelationships();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, () => loadRelationships())
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
@@ -159,7 +183,25 @@ export default function ChatsScreen() {
       sender_id: user.id, receiver_id: receiverId,
     });
     if (!error) {
-      setSearchResults((prev) => prev.filter((u) => u.id !== receiverId));
+      // Add to sent requests set — user stays visible with "Requested" state
+      setSentRequests(prev => new Set([...prev, receiverId]));
+    }
+  };
+
+  // Get the relationship status for a user in search results
+  const getRelationStatus = (userId: string): 'add' | 'requested' | 'friends' => {
+    if (existingFriends.has(userId)) return 'friends';
+    if (sentRequests.has(userId)) return 'requested';
+    return 'add';
+  };
+
+  const handleUserTap = (userId: string, status: string) => {
+    if (status === 'friends') {
+      const conv = conversations.find(c => c.partner?.id === userId);
+      if (conv) {
+        setShowSearch(false);
+        router.push(`/(app)/chats/${conv.id}`);
+      }
     }
   };
 
@@ -287,27 +329,53 @@ export default function ChatsScreen() {
               ) : null}
             </View>
 
-            {searchResults.map((u) => (
-              <View key={u.id} style={styles.searchResultRow}>
-                <View style={styles.searchResultAvatar}>
-                  {u.profile_image ? (
-                    <Image source={{ uri: u.profile_image }} style={styles.searchResultAvatarImg} />
-                  ) : (
-                    <Text style={styles.avatarInitials}>{u.alias[0]?.toUpperCase()}</Text>
-                  )}
-                </View>
-                <View style={styles.searchResultInfo}>
-                  <Text style={styles.searchResultAlias}>{u.alias}</Text>
-                  <Text style={styles.searchResultUsername}>@{u.username}</Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.addBtn}
-                  onPress={() => sendFriendRequest(u.id)}
+            {searchResults.map((u) => {
+              const status = getRelationStatus(u.id);
+              return (
+                <TouchableOpacity 
+                  key={u.id} 
+                  style={styles.searchResultRow}
+                  onPress={() => handleUserTap(u.id, status)}
+                  activeOpacity={status === 'friends' ? 0.7 : 1}
                 >
-                  <Text style={styles.addBtnText}>Add</Text>
+                  <View style={styles.searchResultAvatar}>
+                    {u.profile_image ? (
+                      <Image source={{ uri: u.profile_image }} style={styles.searchResultAvatarImg} />
+                    ) : (
+                      <Text style={styles.avatarInitials}>{u.alias?.[0]?.toUpperCase() || '?'}</Text>
+                    )}
+                  </View>
+                  <View style={styles.searchResultInfo}>
+                    <Text style={styles.searchResultAlias}>{u.alias}</Text>
+                    <Text style={styles.searchResultUsername}>@{u.username}</Text>
+                  </View>
+                  {status === 'friends' ? (
+                    <View style={styles.friendsBadge}>
+                      <AppIcon name="check" size={13} color={Colors.green} />
+                      <Text style={styles.friendsBadgeText}>Friends</Text>
+                    </View>
+                  ) : status === 'requested' ? (
+                    <View style={styles.requestedBtn}>
+                      <AppIcon name="clock" size={13} color={Colors.labelSecondary} />
+                      <Text style={styles.requestedBtnText}>Requested</Text>
+                    </View>
+                  ) : (
+                    <TouchableOpacity
+                      style={styles.addBtn}
+                      onPress={() => sendFriendRequest(u.id)}
+                    >
+                      <Text style={styles.addBtnText}>Add</Text>
+                    </TouchableOpacity>
+                  )}
                 </TouchableOpacity>
+              );
+            })}
+
+            {friendSearch.length >= 2 && searchResults.length === 0 && (
+              <View style={styles.noResultsRow}>
+                <Text style={styles.noResultsText}>No users found for "{friendSearch}"</Text>
               </View>
-            ))}
+            )}
           </View>
         </Animated.View>
       )}
@@ -449,6 +517,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 6,
   },
   addBtnText: { color: '#fff', fontWeight: '600', fontSize: 13 },
+  requestedBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: Colors.fillTertiary, borderRadius: Radii.full,
+    paddingHorizontal: 14, paddingVertical: 6,
+  },
+  requestedBtnText: { color: Colors.labelSecondary, fontWeight: '600', fontSize: 13 },
+  friendsBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: 'rgba(52,199,89,0.12)', borderRadius: Radii.full,
+    paddingHorizontal: 14, paddingVertical: 6,
+  },
+  friendsBadgeText: { color: Colors.green, fontWeight: '600', fontSize: 13 },
+  noResultsRow: { paddingVertical: 16, alignItems: 'center' },
+  noResultsText: { ...Typography.subheadline, color: Colors.labelTertiary },
 
   // Friend requests section
   requestsSection: {

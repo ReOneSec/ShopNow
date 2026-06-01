@@ -7,9 +7,12 @@ import SensorLock from '@/components/disguise/SensorLock';
 
 export default function AppLayout() {
   const router = useRouter();
-  const { isAuthenticated, isUnlocked, setUser } = useAuthStore();
+  const { isAuthenticated, isUnlocked, isLoading, setUser } = useAuthStore();
 
   useEffect(() => {
+    // Wait for auth to finish loading before making routing decisions
+    if (isLoading) return;
+
     if (!isUnlocked || !isAuthenticated) {
       router.replace('/(disguise)');
       return;
@@ -31,7 +34,7 @@ export default function AppLayout() {
     return () => {
       (supabase.rpc as any)('update_presence', { is_online_status: false });
     };
-  }, [isAuthenticated, isUnlocked]);
+  }, [isAuthenticated, isUnlocked, isLoading]);
 
   return (
     <>
@@ -40,7 +43,6 @@ export default function AppLayout() {
         <Stack.Screen name="chats/index" />
         <Stack.Screen name="chats/[id]" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="vault/index" />
-
         <Stack.Screen name="settings/index" />
       </Stack>
     </>

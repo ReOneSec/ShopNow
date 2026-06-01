@@ -47,10 +47,10 @@ export default function WishlistScreen() {
                 <View style={styles.cardInfo}>
                   <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
                   <View style={styles.priceRow}>
-                    <Text style={styles.cardPrice}>₹{item.price.toLocaleString()}</Text>
-                    <Text style={styles.cardOrigPrice}>₹{item.originalPrice.toLocaleString()}</Text>
+                    <Text style={styles.cardPrice}>₹{(item.price ?? 0).toLocaleString()}</Text>
+                    <Text style={styles.cardOrigPrice}>₹{(item.originalPrice ?? item.price ?? 0).toLocaleString()}</Text>
                   </View>
-                  <Text style={styles.cardRating}>⭐ {item.rating} ({item.reviews.toLocaleString()})</Text>
+                  <Text style={styles.cardRating}>⭐ {item.rating} ({(item.reviews ?? 0).toLocaleString()})</Text>
                   <View style={styles.actionRow}>
                     <TouchableOpacity
                       style={styles.cartBtn}

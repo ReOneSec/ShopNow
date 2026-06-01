@@ -33,6 +33,8 @@ export default function LoginScreen() {
       Alert.alert('Login Failed', error.message);
     } else {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      // Unlock the app so the (app) layout guard allows entry
+      await useAuthStore.getState().unlockApp();
       // Check if profile exists and load it into the store
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (authUser) {

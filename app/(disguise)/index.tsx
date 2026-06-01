@@ -28,6 +28,7 @@ import Animated, {
 import { useRouter } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
+import * as LocalAuthentication from 'expo-local-authentication';
 import { Colors, Spacing, Radii, Shadows, Typography } from '@/constants/theme';
 import AppIcon, { IconName } from '@/components/ui/AppIcon';
 import { FAKE_PRODUCTS, FAKE_CATEGORIES, FAKE_BANNERS } from '@/constants/fakeData';
@@ -141,15 +142,13 @@ export default function DisguiseHomeScreen() {
     fetchLiveProducts();
   }, []);
 
-  // ── Welcome Popup ────────────────────────────────────────────────────────
+  // ── Welcome Popup (only for shopping, not StealthChat) ────────────────────
   useEffect(() => {
-    if (!isAuthenticated) {
-      const timer = setTimeout(() => {
-        setWelcomeModalVisible(true);
-      }, 800);
-      return () => clearTimeout(timer);
-    }
-  }, [isAuthenticated]);
+    const timer = setTimeout(() => {
+      setWelcomeModalVisible(true);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Security state
   const tapCount = useRef(0);
@@ -259,6 +258,39 @@ export default function DisguiseHomeScreen() {
   const hotspotTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const singleTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const authenticateAndEnter = async () => {
+    // Try biometric first
+    const hasHardware = await LocalAuthentication.hasHardwareAsync();
+    const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+
+    if (hasHardware && isEnrolled) {
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: 'Verify your identity',
+        fallbackLabel: 'Use PIN',
+        disableDeviceFallback: false,
+      });
+
+      if (!result.success) {
+        // Auth failed or cancelled — stay on shopping page
+        return;
+      }
+    }
+    // else: no biometric hardware — skip straight through
+    // (on real device this won't happen, but good for emulator testing)
+
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+    // Check if a saved Supabase session exists
+    if (isAuthenticated) {
+      // Session exists — unlock and go straight to chats
+      await useAuthStore.getState().unlockApp();
+      router.replace('/(app)/chats');
+    } else {
+      // No session — need to log in first
+      router.push('/(auth)/stealth-login');
+    }
+  };
+
   const handleHotspotPress = () => {
     resetInactivityTimer();
     hotspotTapCount.current += 1;
@@ -268,8 +300,7 @@ export default function DisguiseHomeScreen() {
 
     if (hotspotTapCount.current >= 10) {
       hotspotTapCount.current = 0;
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.push('/(auth)/stealth-login');
+      authenticateAndEnter();
     } else {
       singleTapTimer.current = setTimeout(() => {
         if (hotspotTapCount.current < 10) {

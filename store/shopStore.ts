@@ -60,14 +60,22 @@ export const useShopStore = create<ShopState>((set, get) => ({
     try {
       const res = await fetch('https://fakestoreapi.com/products');
       const data = await res.json();
-      const mapped: FakeProduct[] = data.map((item: any) => ({
-        id: item.id.toString(),
-        name: item.title,
-        description: item.description,
-        price: item.price * 80, // rough conversion to INR
-        imageUrl: item.image,
-        rating: item.rating?.rate || 4.5,
-      }));
+      const mapped: FakeProduct[] = data.map((item: any) => {
+        const price = Math.round(item.price * 80); // rough conversion to INR
+        const originalPrice = Math.round(price * 1.4);
+        return {
+          id: item.id.toString(),
+          name: item.title,
+          description: item.description,
+          price,
+          originalPrice,
+          discount: Math.round(((originalPrice - price) / originalPrice) * 100),
+          rating: item.rating?.rate || 4.5,
+          reviews: item.rating?.count || 0,
+          category: item.category || 'General',
+          imageUrl: item.image,
+        };
+      });
       set({ products: mapped, isLoadingProducts: false });
     } catch (e) {
       console.warn('Failed to fetch live products, falling back to dummy data', e);
