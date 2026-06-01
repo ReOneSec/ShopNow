@@ -26,6 +26,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
 import { Colors, Spacing, Radii, Shadows, Typography } from '@/constants/theme';
 import AppIcon, { IconName } from '@/components/ui/AppIcon';
@@ -41,13 +42,96 @@ const { width: SCREEN_W } = Dimensions.get('window');
 const BANNER_W = SCREEN_W - Spacing.screenPadding * 2;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Extracted Product Card component to avoid calling hooks inside .map()
+// ─────────────────────────────────────────────────────────────────────────────
+function ProductCard({
+  product,
+  idx,
+  onTap,
+  onAddToCart,
+  onToggleWishlist,
+  isWishlisted,
+}: {
+  product: any;
+  idx: number;
+  onTap: () => void;
+  onAddToCart: () => void;
+  onToggleWishlist: () => void;
+  isWishlisted: boolean;
+}) {
+  const scale = useSharedValue(1);
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  return (
+    <Animated.View
+      entering={FadeInUp.delay(idx * 60).springify().damping(18).stiffness(180)}
+      style={animatedStyle}
+    >
+      <TouchableOpacity
+        style={styles.productCard}
+        onPressIn={() => { scale.value = withSpring(0.96); }}
+        onPressOut={() => { scale.value = withSpring(1); }}
+        onPress={onTap}
+        activeOpacity={0.95}
+      >
+        <View style={styles.productImageWrapper}>
+          <Image
+            source={{ uri: product.imageUrl }}
+            style={styles.productImage}
+            resizeMode="cover"
+          />
+          {product.badge && (
+            <View style={styles.productBadge}>
+              <Text style={styles.productBadgeText}>{product.badge}</Text>
+            </View>
+          )}
+          <View style={styles.discountBadge}>
+            <Text style={styles.discountText}>{Math.floor(Math.random() * 40) + 10}% OFF</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.wishlistBtn}
+            onPress={onToggleWishlist}
+          >
+            <AppIcon name={isWishlisted ? 'heart-solid' : 'heart'} size={16} color={isWishlisted ? Colors.red : Colors.labelSecondary} />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.productInfo}>
+          <Text style={styles.productName} numberOfLines={2}>
+            {product.name}
+          </Text>
+          <View style={styles.ratingRow}>
+            <Text style={styles.ratingText}>⭐ {product.rating}</Text>
+            <Text style={styles.reviewsText}>({Math.floor(Math.random() * 500) + 10})</Text>
+          </View>
+          <View style={styles.priceRow}>
+            <Text style={styles.price}>₹{product.price.toLocaleString()}</Text>
+            <Text style={styles.originalPrice}>₹{Math.floor(product.price * 1.3).toLocaleString()}</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.addToCartBtn}
+            onPress={onAddToCart}
+          >
+            <Text style={styles.addToCartText}>Add to Cart</Text>
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Fake Shopping Home — the disguise layer
 // ─────────────────────────────────────────────────────────────────────────────
 export default function DisguiseHomeScreen() {
   const router = useRouter();
+  const isFocused = useIsFocused();
   const [selectedCategory, setSelectedCategory] = useState('1');
   const [searchText, setSearchText] = useState('');
   const [bannerIndex, setBannerIndex] = useState(0);
+  const [welcomeModalVisible, setWelcomeModalVisible] = useState(false);
 
   // Shop store
   const { addToCart, getCartCount, toggleWishlist, isInWishlist, profile, products, fetchLiveProducts, isLoadingProducts } = useShopStore();
@@ -61,14 +145,7 @@ export default function DisguiseHomeScreen() {
   useEffect(() => {
     if (!isAuthenticated) {
       const timer = setTimeout(() => {
-        Alert.alert(
-          'Welcome to ShopNow!',
-          'Create an account to track your orders and get personalized offers.',
-          [
-            { text: 'Later', style: 'cancel' },
-            { text: 'Create Account', onPress: () => router.push('/(auth)/register') }
-          ]
-        );
+        setWelcomeModalVisible(true);
       }, 800);
       return () => clearTimeout(timer);
     }
@@ -78,16 +155,34 @@ export default function DisguiseHomeScreen() {
   const tapCount = useRef(0);
   const inactivityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── DEV_MODE: set to false to re-enable security timers ───────────────
+  const DEV_MODE = true;
+
   // ── Inactivity timer ─────────────────────────────────────────────────────
+  // Only active when this disguise screen is focused
   const resetInactivityTimer = useCallback(() => {
+    if (DEV_MODE) return; // disabled for development
+    if (!isFocused) return;
     if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
     inactivityTimer.current = setTimeout(() => {
       BackHandler.exitApp();
     }, INACTIVITY_TIMEOUT_SECONDS * 1000);
-  }, []);
+  }, [isFocused]);
 
-  // ── Background detection ─────────────────────────────────────────────────
+  // ── Background detection & inactivity — only when disguise screen is focused ──
   useEffect(() => {
+    if (DEV_MODE) return; // disabled for development
+
+    if (!isFocused) {
+      // Screen lost focus (e.g. navigated to stealth-login) — clear everything
+      if (inactivityTimer.current) {
+        clearTimeout(inactivityTimer.current);
+        inactivityTimer.current = null;
+      }
+      return;
+    }
+
+    // Screen is focused — start security measures
     resetInactivityTimer();
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'background' || state === 'inactive') {
@@ -98,13 +193,57 @@ export default function DisguiseHomeScreen() {
       sub.remove();
       if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
     };
-  }, []);
+  }, [isFocused]);
 
   // ── Banner auto-scroll ───────────────────────────────────────────────────
+  const flatListRef = useRef<FlatList>(null);
+
   useEffect(() => {
-    const t = setInterval(() => setBannerIndex((i) => (i + 1) % FAKE_BANNERS.length), 3500);
+    const t = setInterval(() => {
+      setBannerIndex((prev) => {
+        const next = (prev + 1) % FAKE_BANNERS.length;
+        flatListRef.current?.scrollToIndex({
+          index: next,
+          animated: true,
+        });
+        return next;
+      });
+    }, 3500);
     return () => clearInterval(t);
   }, []);
+
+  // ── Flash Sale Countdown Timer ───────────────────────────────────────────
+  const [timeLeft, setTimeLeft] = useState({ hours: 2, minutes: 34, seconds: 18 });
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTimeLeft((prev) => {
+        let { hours, minutes, seconds } = prev;
+        if (seconds > 0) {
+          seconds--;
+        } else {
+          seconds = 59;
+          if (minutes > 0) {
+            minutes--;
+          } else {
+            minutes = 59;
+            if (hours > 0) {
+              hours--;
+            } else {
+              hours = 2;
+              minutes = 59;
+              seconds = 59;
+            }
+          }
+        }
+        return { hours, minutes, seconds };
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const formatNumber = (num: number) => num.toString().padStart(2, '0');
+  const timerString = `${formatNumber(timeLeft.hours)}:${formatNumber(timeLeft.minutes)}:${formatNumber(timeLeft.seconds)}`;
 
   // ── Random tap counter (security) ────────────────────────────────────────
   const handleRandomTap = () => {
@@ -171,9 +310,10 @@ export default function DisguiseHomeScreen() {
 
       {/* ── Header ─────────────────────────────────────────── */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerGreeting}>Welcome back</Text>
-          <Text style={styles.headerTitle}>{isAuthenticated && user ? user.alias : profile.name}</Text>
+        <View style={{ flex: 1, marginRight: 8 }}>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            Welcome, {isAuthenticated && user ? user.alias : profile.name}
+          </Text>
         </View>
         <View style={styles.headerActions}>
           <TouchableOpacity
@@ -181,7 +321,7 @@ export default function DisguiseHomeScreen() {
             onPress={handleHotspotPress}
             activeOpacity={0.7}
           >
-            <AppIcon name="support" size={20} color={Colors.label} />
+            <AppIcon name="help" size={20} color={Colors.label} />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.cartBtn}
@@ -221,30 +361,50 @@ export default function DisguiseHomeScreen() {
 
         {/* ── Banner Carousel ────────────────────────────────── */}
         <View style={styles.bannerContainer}>
-          {FAKE_BANNERS.map((banner, index) =>
-            index === bannerIndex ? (
-              <Animated.View
-                key={banner.id}
-                entering={FadeIn.duration(380).springify().damping(20).stiffness(140)}
-                exiting={FadeOut.duration(220)}
+          <FlatList
+            ref={flatListRef}
+            data={FAKE_BANNERS}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            keyExtractor={(item) => item.id}
+            onMomentumScrollEnd={(e) => {
+              const contentOffset = e.nativeEvent.contentOffset.x;
+              const width = e.nativeEvent.layoutMeasurement.width;
+              const index = Math.round(contentOffset / width);
+              setBannerIndex(index);
+            }}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                onPress={handleRandomTap}
+                activeOpacity={0.9}
+                style={styles.bannerCard}
               >
-                <TouchableOpacity
-                  onPress={handleRandomTap}
-                  activeOpacity={0.9}
-                  style={[styles.bannerCard, { backgroundColor: banner.bg[0] }]}
-                >
+                <Image
+                  source={{
+                    uri: item.id === 'b1'
+                      ? 'https://images.unsplash.com/photo-1498049794561-7780e7231661?w=800'
+                      : item.id === 'b2'
+                      ? 'https://images.unsplash.com/photo-1483985988355-763728e1935b?w=800'
+                      : 'https://images.unsplash.com/photo-1468495244123-6c6c332eeece?w=800'
+                  }}
+                  style={StyleSheet.absoluteFillObject}
+                  resizeMode="cover"
+                />
+                <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.5)' }]} />
+                <View style={{ zIndex: 2 }}>
                   <View style={styles.bannerBadge}>
-                    <Text style={styles.bannerBadgeText}>{banner.badge}</Text>
+                    <Text style={styles.bannerBadgeText}>{item.badge}</Text>
                   </View>
-                  <Text style={styles.bannerTitle}>{banner.title}</Text>
-                  <Text style={styles.bannerSubtitle}>{banner.subtitle}</Text>
+                  <Text style={styles.bannerTitle}>{item.title}</Text>
+                  <Text style={styles.bannerSubtitle}>{item.subtitle}</Text>
                   <View style={styles.bannerBtn}>
                     <Text style={styles.bannerBtnText}>Shop Now</Text>
                   </View>
-                </TouchableOpacity>
-              </Animated.View>
-            ) : null
-          )}
+                </View>
+              </TouchableOpacity>
+            )}
+          />
           <View style={styles.dotsRow}>
             {FAKE_BANNERS.map((_, i) => (
               <View
@@ -293,10 +453,20 @@ export default function DisguiseHomeScreen() {
         />
 
         {/* ── Flash Sale Strip ─────────────────────────────────── */}
-        <View style={styles.flashStrip}>
-          <Text style={styles.flashTitle}>FLASH SALE</Text>
-          <Text style={styles.flashTimer}>Ends in 02:34:18</Text>
-        </View>
+        <TouchableOpacity
+          style={styles.flashStrip}
+          onPress={handleRandomTap}
+          activeOpacity={0.9}
+        >
+          <Image
+            source={{ uri: 'https://images.unsplash.com/photo-1555529669-e69e7aa0db9a?w=800' }}
+            style={StyleSheet.absoluteFillObject}
+            resizeMode="cover"
+          />
+          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.6)' }]} />
+          <Text style={[styles.flashTitle, { color: '#FFF', zIndex: 2 }]}>⚡ FLASH SALE</Text>
+          <Text style={[styles.flashTimer, { color: '#FFD700', zIndex: 2 }]}>Ends in {timerString}</Text>
+        </TouchableOpacity>
 
         {/* ── Product Grid ─────────────────────────────────────── */}
         <Text style={styles.sectionTitle}>
@@ -308,80 +478,28 @@ export default function DisguiseHomeScreen() {
               <Animated.View key={idx} style={[styles.productCard, skeletonStyle, { height: 260, backgroundColor: Colors.fillSecondary }]} />
             ))
           ) : (
-            searchFiltered.map((product, idx) => {
-              const scale = useSharedValue(1);
-              const animatedStyle = useAnimatedStyle(() => ({
-                transform: [{ scale: scale.value }]
-              }));
-
-              return (
-                <Animated.View
-                  key={product.id}
-                  entering={FadeInUp.delay(idx * 60).springify().damping(18).stiffness(180)}
-                  style={animatedStyle}
-                >
-                  <TouchableOpacity
-                    style={styles.productCard}
-                    onPressIn={() => { scale.value = withSpring(0.96); }}
-                    onPressOut={() => { scale.value = withSpring(1); }}
-                    onPress={() => {
-                      resetInactivityTimer();
-                      handleRandomTap();
-                    }}
-                    activeOpacity={0.95}
-                  >
-                    <View style={styles.productImageWrapper}>
-                      <Image
-                        source={{ uri: product.imageUrl }}
-                        style={styles.productImage}
-                        resizeMode="cover"
-                      />
-                      {product.badge && (
-                        <View style={styles.productBadge}>
-                          <Text style={styles.productBadgeText}>{product.badge}</Text>
-                        </View>
-                      )}
-                      <View style={styles.discountBadge}>
-                        <Text style={styles.discountText}>{Math.floor(Math.random() * 40) + 10}% OFF</Text>
-                      </View>
-                      <TouchableOpacity
-                        style={styles.wishlistBtn}
-                        onPress={() => {
-                          toggleWishlist(product);
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                          resetInactivityTimer();
-                        }}
-                      >
-                        <AppIcon name={isInWishlist(product.id) ? 'heart-solid' : 'heart'} size={16} color={isInWishlist(product.id) ? Colors.red : Colors.labelSecondary} />
-                      </TouchableOpacity>
-                    </View>
-                    <View style={styles.productInfo}>
-                      <Text style={styles.productName} numberOfLines={2}>
-                        {product.name}
-                      </Text>
-                      <View style={styles.ratingRow}>
-                        <Text style={styles.ratingText}>⭐ {product.rating}</Text>
-                        <Text style={styles.reviewsText}>({Math.floor(Math.random() * 500) + 10})</Text>
-                      </View>
-                      <View style={styles.priceRow}>
-                        <Text style={styles.price}>₹{product.price.toLocaleString()}</Text>
-                        <Text style={styles.originalPrice}>₹{Math.floor(product.price * 1.3).toLocaleString()}</Text>
-                      </View>
-                      <TouchableOpacity
-                        style={styles.addToCartBtn}
-                        onPress={() => {
-                          addToCart(product);
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                          resetInactivityTimer();
-                        }}
-                      >
-                        <Text style={styles.addToCartText}>Add to Cart</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </TouchableOpacity>
-                </Animated.View>
-              );
-            })
+            searchFiltered.map((product, idx) => (
+              <ProductCard
+                key={product.id}
+                product={product}
+                idx={idx}
+                onTap={() => {
+                  resetInactivityTimer();
+                  handleRandomTap();
+                }}
+                onAddToCart={() => {
+                  addToCart(product);
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  resetInactivityTimer();
+                }}
+                onToggleWishlist={() => {
+                  toggleWishlist(product);
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  resetInactivityTimer();
+                }}
+                isWishlisted={isInWishlist(product.id)}
+              />
+            ))
           )}
         </View>
 
@@ -414,6 +532,41 @@ export default function DisguiseHomeScreen() {
           </TouchableOpacity>
         ))}
       </View>
+
+      {/* ── Welcome Custom Modal ────────────────────────────── */}
+      {welcomeModalVisible && (
+        <Animated.View
+          entering={FadeIn.duration(250)}
+          exiting={FadeOut.duration(200)}
+          style={styles.modalOverlay}
+        >
+          <Animated.View
+            entering={FadeIn.duration(200)}
+            exiting={FadeOut.duration(150)}
+            style={styles.modalCard}
+          >
+            <Text style={styles.modalTitle}>Welcome to ShopNow</Text>
+            <Text style={styles.modalText}>
+              Create an account to track your orders, save items to your wishlist, and get personalized offers.
+            </Text>
+            <TouchableOpacity
+              style={styles.modalPrimaryBtn}
+              onPress={() => {
+                setWelcomeModalVisible(false);
+                router.push('/(auth)/register');
+              }}
+            >
+              <Text style={styles.modalPrimaryBtnText}>Create Account</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.modalSecondaryBtn}
+              onPress={() => setWelcomeModalVisible(false)}
+            >
+              <Text style={styles.modalSecondaryBtnText}>Later</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        </Animated.View>
+      )}
     </View>
   );
 }
@@ -472,11 +625,14 @@ const styles = StyleSheet.create({
   bannerContainer: {
     marginHorizontal: Spacing.screenPadding,
     marginVertical: 16,
+    height: 165,
   },
   bannerCard: {
     width: BANNER_W, borderRadius: Radii.card,
     padding: 20, minHeight: 140,
     justifyContent: 'center',
+    overflow: 'hidden',
+    position: 'relative',
     ...Shadows.md,
   },
   bannerBadge: {
@@ -494,7 +650,7 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)',
   },
   bannerBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  dotsRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 10, gap: 6 },
+  dotsRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 12, gap: 6 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.separatorOpaque },
   dotActive: { backgroundColor: Colors.shopAccent, width: 18 },
 
@@ -520,8 +676,10 @@ const styles = StyleSheet.create({
   flashStrip: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     marginHorizontal: Spacing.screenPadding, marginTop: 16, marginBottom: 8,
-    backgroundColor: '#FFF3E0', borderRadius: Radii.md,
-    paddingHorizontal: 16, paddingVertical: 10,
+    borderRadius: Radii.md,
+    paddingHorizontal: 16, paddingVertical: 12,
+    overflow: 'hidden',
+    position: 'relative',
   },
   flashTitle: { fontWeight: '800', fontSize: 14, color: Colors.shopAccent },
   flashTimer: { fontWeight: '600', fontSize: 14, color: Colors.shopAccent, fontVariant: ['tabular-nums'] },
@@ -584,4 +742,59 @@ const styles = StyleSheet.create({
   navLabel: { ...Typography.caption2, color: Colors.labelTertiary },
   navLabelActive: { color: Colors.shopAccent, fontWeight: '600' },
   navDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: Colors.shopAccent },
+
+  // Custom Modal Styles
+  modalOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 999,
+  },
+  modalCard: {
+    width: SCREEN_W * 0.85,
+    backgroundColor: Colors.surface,
+    borderRadius: Radii.card,
+    padding: 24,
+    alignItems: 'center',
+    ...Shadows.lg,
+  },
+  modalTitle: {
+    ...Typography.title3,
+    color: Colors.label,
+    fontWeight: '800',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  modalText: {
+    ...Typography.body,
+    color: Colors.labelSecondary,
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  modalPrimaryBtn: {
+    backgroundColor: Colors.shopAccent,
+    width: '100%',
+    paddingVertical: 14,
+    borderRadius: Radii.md,
+    alignItems: 'center',
+    marginBottom: 12,
+    ...Shadows.sm,
+  },
+  modalPrimaryBtnText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  modalSecondaryBtn: {
+    width: '100%',
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  modalSecondaryBtnText: {
+    color: Colors.labelSecondary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
 });

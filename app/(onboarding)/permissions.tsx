@@ -1,20 +1,26 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
-import * as Notifications from 'expo-notifications';
 import * as Haptics from 'expo-haptics';
 import Constants from 'expo-constants';
 import { supabase } from '@/services/supabase/client';
 import { Colors, Radii, Shadows, Spacing, Typography } from '@/constants/theme';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldPlaySound: false,
-    shouldSetBadge: false,
-    shouldShowList: true,
-  }),
-});
+const isExpoGo = Constants.appOwnership === 'expo';
+
+// Only import and configure expo-notifications outside of Expo Go
+let Notifications: typeof import('expo-notifications') | null = null;
+if (!isExpoGo) {
+  Notifications = require('expo-notifications') as typeof import('expo-notifications');
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldPlaySound: false,
+      shouldSetBadge: false,
+      shouldShowList: true,
+    }),
+  });
+}
 
 export default function PermissionsScreen() {
   const router = useRouter();
@@ -22,6 +28,14 @@ export default function PermissionsScreen() {
   const [loading, setLoading] = useState(false);
 
   const requestNotifications = async () => {
+    // In Expo Go, skip native notification APIs and simulate granting
+    if (isExpoGo || !Notifications) {
+      console.warn('Push notifications are not supported in Expo Go. Skipping.');
+      setGranted(true);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      return;
+    }
+
     // Set up Android notification channel
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('default', {

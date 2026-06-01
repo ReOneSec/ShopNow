@@ -53,7 +53,7 @@ export const useShopStore = create<ShopState>((set, get) => ({
     email: '',
     avatar: null,
   },
-  orders: FAKE_ORDERS,
+  orders: [],
 
   fetchLiveProducts: async () => {
     set({ isLoadingProducts: true });

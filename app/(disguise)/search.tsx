@@ -33,13 +33,13 @@ export default function SearchScreen() {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={styles.backText}>←</Text>
+          <AppIcon name="back" size={24} color={Colors.label} />
         </TouchableOpacity>
         <View style={styles.searchBar}>
-          <AppIcon name="search" size={16} color={Colors.label} />
+          <AppIcon name="search" size={16} color={Colors.label} style={styles.searchIcon} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search products, brands..."
+            placeholder="Search products..."
             placeholderTextColor={Colors.labelTertiary}
             value={query}
             onChangeText={setQuery}
@@ -62,12 +62,12 @@ export default function SearchScreen() {
               style={styles.recentItem}
               onPress={() => setQuery(s)}
             >
-              <AppIcon name="clock" size={16} color={Colors.labelSecondary} />
+              <AppIcon name="clock" size={14} color={Colors.labelSecondary} />
               <Text style={styles.recentText}>{s}</Text>
             </TouchableOpacity>
           ))}
 
-          <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Popular Categories</Text>
+          <Text style={[styles.sectionTitle, { marginTop: 20 }]}>Popular Categories</Text>
           <View style={styles.categoryGrid}>
             {[
               { icon: 'fashion', label: 'Fashion' },
@@ -82,7 +82,7 @@ export default function SearchScreen() {
                 style={styles.categoryChip}
                 onPress={() => setQuery(cat.label)}
               >
-                <AppIcon name={cat.icon as IconName} size={16} color={Colors.label} />
+                <AppIcon name={cat.icon as IconName} size={14} color={Colors.labelSecondary} />
                 <Text style={styles.categoryChipText}>{cat.label}</Text>
               </TouchableOpacity>
             ))}
@@ -137,34 +137,35 @@ export default function SearchScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: Spacing.screenPadding, paddingTop: 56, paddingBottom: 12,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: Spacing.screenPadding, paddingTop: 52, paddingBottom: 8,
     backgroundColor: Colors.surface, ...Shadows.sm,
   },
-  backBtn: { paddingRight: 4 },
+  backBtn: { padding: 4, justifyContent: 'center', alignItems: 'center' },
   backText: { fontSize: 24, color: Colors.label },
   searchBar: {
     flex: 1, flexDirection: 'row', alignItems: 'center',
-    backgroundColor: Colors.fillTertiary, borderRadius: Radii.lg,
-    paddingHorizontal: 14, paddingVertical: 12,
+    backgroundColor: Colors.fillTertiary, borderRadius: Radii.md,
+    paddingHorizontal: 10, paddingVertical: 6,
   },
-  searchIcon: { fontSize: 16, marginRight: 8 },
-  searchInput: { flex: 1, ...Typography.body, color: Colors.label },
-  clearBtn: { fontSize: 14, color: Colors.labelSecondary, paddingLeft: 8 },
+  searchIcon: { marginRight: 6 },
+  searchInput: { flex: 1, ...Typography.body, color: Colors.label, paddingVertical: 2 },
+  clearBtn: { fontSize: 14, color: Colors.labelSecondary, paddingHorizontal: 6 },
 
   // Recent
-  recentSection: { padding: Spacing.screenPadding },
-  sectionTitle: { ...Typography.headline, color: Colors.label, marginBottom: 12 },
-  recentItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
+  recentSection: { paddingHorizontal: Spacing.screenPadding, paddingTop: 16 },
+  sectionTitle: { ...Typography.subheadline, color: Colors.label, fontWeight: '700', marginBottom: 8 },
+  recentItem: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 },
   recentIcon: { fontSize: 16 },
   recentText: { ...Typography.body, color: Colors.labelSecondary },
 
-  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   categoryChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: Colors.surface, borderRadius: Radii.full,
-    paddingHorizontal: 16, paddingVertical: 10, ...Shadows.sm,
+    paddingHorizontal: 12, paddingVertical: 6, ...Shadows.sm,
   },
-  categoryChipText: { ...Typography.subheadline, color: Colors.label, fontWeight: '600' },
+  categoryChipText: { ...Typography.caption1, color: Colors.labelSecondary, fontWeight: '600' },
 
   // Empty
   emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },

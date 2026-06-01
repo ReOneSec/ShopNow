@@ -4,9 +4,11 @@ import {
   StyleSheet, StatusBar,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import Animated, { FadeInUp } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInUp } from 'react-native-reanimated';
 import { useShopStore } from '@/store/shopStore';
+import { useAuthStore } from '@/store/authStore';
 import { Colors, Radii, Shadows, Spacing, Typography } from '@/constants/theme';
+import AppIcon from '@/components/ui/AppIcon';
 
 const STATUS_COLORS: Record<string, string> = {
   Delivered: Colors.green,
@@ -18,6 +20,27 @@ const STATUS_COLORS: Record<string, string> = {
 export default function OrdersScreen() {
   const router = useRouter();
   const { orders } = useShopStore();
+  const { isAuthenticated } = useAuthStore();
+
+  const renderEmptyState = () => (
+    <Animated.View entering={FadeIn.duration(300)} style={styles.emptyContainer}>
+      <AppIcon name="package" size={64} color={Colors.labelTertiary} />
+      <Text style={styles.emptyTitle}>No Orders Found</Text>
+      <Text style={styles.emptySubtitle}>
+        {isAuthenticated
+          ? "You haven't placed any orders yet. Explore our store to find products!"
+          : "You need an account to view and track orders. Please sign in or register to get started."}
+      </Text>
+      {!isAuthenticated && (
+        <TouchableOpacity
+          style={styles.loginBtn}
+          onPress={() => router.push('/(auth)/stealth-login')}
+        >
+          <Text style={styles.loginBtnText}>Sign In / Register</Text>
+        </TouchableOpacity>
+      )}
+    </Animated.View>
+  );
 
   return (
     <View style={styles.container}>
@@ -30,55 +53,59 @@ export default function OrdersScreen() {
         <View style={{ width: 60 }} />
       </View>
 
-      <FlatList
-        data={orders}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-        renderItem={({ item, index }) => (
-          <Animated.View entering={FadeInUp.delay(index * 50).springify()}>
-            <View style={styles.orderCard}>
-              <View style={styles.orderHeader}>
-                <Text style={styles.orderId}>{item.id}</Text>
-                <View style={[styles.statusBadge, { backgroundColor: STATUS_COLORS[item.status] + '20' }]}>
-                  <Text style={[styles.statusText, { color: STATUS_COLORS[item.status] }]}>
-                    {item.status}
-                  </Text>
+      {!isAuthenticated || orders.length === 0 ? (
+        renderEmptyState()
+      ) : (
+        <FlatList
+          data={orders}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item, index }) => (
+            <Animated.View entering={FadeInUp.delay(index * 50).springify()}>
+              <View style={styles.orderCard}>
+                <View style={styles.orderHeader}>
+                  <Text style={styles.orderId}>{item.id}</Text>
+                  <View style={[styles.statusBadge, { backgroundColor: STATUS_COLORS[item.status] + '20' }]}>
+                    <Text style={[styles.statusText, { color: STATUS_COLORS[item.status] }]}>
+                      {item.status}
+                    </Text>
+                  </View>
                 </View>
-              </View>
-              <View style={styles.orderBody}>
-                {item.imageUrl && (
-                  <Image source={{ uri: item.imageUrl }} style={styles.orderImage} />
+                <View style={styles.orderBody}>
+                  {item.imageUrl && (
+                    <Image source={{ uri: item.imageUrl }} style={styles.orderImage} />
+                  )}
+                  <View style={styles.orderInfo}>
+                    <Text style={styles.orderName}>{item.productName}</Text>
+                    <Text style={styles.orderDate}>Ordered on {item.date}</Text>
+                    <Text style={styles.orderAmount}>₹{item.amount.toLocaleString()}</Text>
+                  </View>
+                </View>
+                {item.status === 'Shipped' && (
+                  <View style={styles.trackingBar}>
+                    <View style={styles.trackDot} />
+                    <View style={styles.trackLine} />
+                    <View style={styles.trackDot} />
+                    <View style={[styles.trackLine, styles.trackLineInactive]} />
+                    <View style={[styles.trackDot, styles.trackDotInactive]} />
+                    <View style={[styles.trackLine, styles.trackLineInactive]} />
+                    <View style={[styles.trackDot, styles.trackDotInactive]} />
+                  </View>
                 )}
-                <View style={styles.orderInfo}>
-                  <Text style={styles.orderName}>{item.productName}</Text>
-                  <Text style={styles.orderDate}>Ordered on {item.date}</Text>
-                  <Text style={styles.orderAmount}>₹{item.amount.toLocaleString()}</Text>
-                </View>
+                {item.status === 'Shipped' && (
+                  <View style={styles.trackLabels}>
+                    <Text style={styles.trackLabel}>Ordered</Text>
+                    <Text style={styles.trackLabel}>Shipped</Text>
+                    <Text style={styles.trackLabelInactive}>Out</Text>
+                    <Text style={styles.trackLabelInactive}>Delivered</Text>
+                  </View>
+                )}
               </View>
-              {item.status === 'Shipped' && (
-                <View style={styles.trackingBar}>
-                  <View style={styles.trackDot} />
-                  <View style={styles.trackLine} />
-                  <View style={styles.trackDot} />
-                  <View style={[styles.trackLine, styles.trackLineInactive]} />
-                  <View style={[styles.trackDot, styles.trackDotInactive]} />
-                  <View style={[styles.trackLine, styles.trackLineInactive]} />
-                  <View style={[styles.trackDot, styles.trackDotInactive]} />
-                </View>
-              )}
-              {item.status === 'Shipped' && (
-                <View style={styles.trackLabels}>
-                  <Text style={styles.trackLabel}>Ordered</Text>
-                  <Text style={styles.trackLabel}>Shipped</Text>
-                  <Text style={styles.trackLabelInactive}>Out</Text>
-                  <Text style={styles.trackLabelInactive}>Delivered</Text>
-                </View>
-              )}
-            </View>
-          </Animated.View>
-        )}
-      />
+            </Animated.View>
+          )}
+        />
+      )}
     </View>
   );
 }
@@ -131,4 +158,39 @@ const styles = StyleSheet.create({
   },
   trackLabel: { ...Typography.caption2, color: Colors.green, fontWeight: '600' },
   trackLabelInactive: { ...Typography.caption2, color: Colors.labelTertiary },
+
+  // Empty State Styles
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.screenPadding * 2,
+    paddingBottom: 80,
+  },
+  emptyTitle: {
+    ...Typography.title3,
+    color: Colors.label,
+    fontWeight: '700',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptySubtitle: {
+    ...Typography.body,
+    color: Colors.labelSecondary,
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  loginBtn: {
+    backgroundColor: Colors.shopAccent,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: Radii.md,
+    ...Shadows.sm,
+  },
+  loginBtnText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
 });

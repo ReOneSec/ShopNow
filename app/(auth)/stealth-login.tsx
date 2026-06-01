@@ -137,6 +137,13 @@ export default function LoginScreen() {
             )}
           </TouchableOpacity>
 
+          <View style={styles.registerRow}>
+            <Text style={styles.registerText}>Don't have an account? </Text>
+            <TouchableOpacity onPress={() => router.replace('/(auth)/stealth-register')}>
+              <Text style={styles.registerLink}>Create Account</Text>
+            </TouchableOpacity>
+          </View>
+
         </BlurView>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -156,44 +163,44 @@ const styles = StyleSheet.create({
   },
   scroll: { flexGrow: 1, justifyContent: 'center', padding: Spacing.screenPadding },
 
-  logoSection: { alignItems: 'center', marginBottom: 32 },
+  logoSection: { alignItems: 'center', marginBottom: 16 },
   logoIcon: {
-    width: 80, height: 80, borderRadius: 24,
+    width: 60, height: 60, borderRadius: 18,
     backgroundColor: Colors.blue, justifyContent: 'center', alignItems: 'center',
-    marginBottom: 12, ...Shadows.lg,
+    marginBottom: 8, ...Shadows.md,
   },
-  logoEmoji: { fontSize: 36 },
-  appName: { fontSize: 28, fontWeight: '800', color: '#fff', letterSpacing: 0.5 },
-  tagline: { fontSize: 14, color: 'rgba(255,255,255,0.6)', marginTop: 4 },
+  logoEmoji: { fontSize: 28 },
+  appName: { fontSize: 24, fontWeight: '800', color: '#fff', letterSpacing: 0.5 },
+  tagline: { fontSize: 13, color: 'rgba(255,255,255,0.6)', marginTop: 2 },
 
   card: {
-    borderRadius: Radii.sheet, padding: 28,
+    borderRadius: Radii.sheet, padding: 20,
     overflow: 'hidden',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
     ...Shadows.lg,
   },
-  cardTitle: { ...Typography.title2, color: Colors.label, marginBottom: 4 },
-  cardSubtitle: { ...Typography.subheadline, color: Colors.labelSecondary, marginBottom: 24 },
+  cardTitle: { ...Typography.title3, color: Colors.label, marginBottom: 2 },
+  cardSubtitle: { ...Typography.subheadline, color: Colors.labelSecondary, marginBottom: 16 },
 
-  inputWrapper: { marginBottom: 16 },
-  inputLabel: { ...Typography.footnote, fontWeight: '600', color: Colors.labelSecondary, marginBottom: 8 },
+  inputWrapper: { marginBottom: 12 },
+  inputLabel: { ...Typography.footnote, fontWeight: '600', color: Colors.labelSecondary, marginBottom: 6 },
   inputRow: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: Colors.fillTertiary, borderRadius: Radii.md,
-    paddingHorizontal: 14, paddingVertical: 14,
+    paddingHorizontal: 12, paddingVertical: 10,
   },
   input: { flex: 1, ...Typography.body, color: Colors.label },
   showPassText: { ...Typography.footnote, color: Colors.blue, fontWeight: '600' },
 
   loginBtn: {
     backgroundColor: Colors.blue, borderRadius: Radii.lg,
-    paddingVertical: 16, alignItems: 'center', marginTop: 8,
+    paddingVertical: 12, alignItems: 'center', marginTop: 4,
     ...Shadows.md,
   },
   loginBtnDisabled: { opacity: 0.7 },
-  loginBtnText: { color: '#fff', fontSize: 17, fontWeight: '700' },
+  loginBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 
-  registerRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 20 },
+  registerRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 12 },
   registerText: { ...Typography.subheadline, color: Colors.labelSecondary },
   registerLink: { ...Typography.subheadline, color: Colors.blue, fontWeight: '600' },
 });
